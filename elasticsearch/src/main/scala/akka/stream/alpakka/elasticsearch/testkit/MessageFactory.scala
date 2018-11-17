@@ -42,11 +42,8 @@ object MessageFactory {
   @ApiMayChange
   def createWriteResult[T, PT](
       message: WriteMessage[T, PT],
-      error: Option[String]
-  ): WriteResult[T, PT] = new WriteResult(
-    message,
-    error
-  )
+      error: Option[Exception]
+  ): WriteResult[T, PT] = new WriteResult(message, error)
 
   /**
    * Java API
@@ -54,10 +51,7 @@ object MessageFactory {
   @ApiMayChange
   def createWriteResult[T, PT](
       message: WriteMessage[T, PT],
-      error: java.util.Optional[String]
-  ): WriteResult[T, PT] = new WriteResult(
-    message,
-    error.asScala
-  )
+      error: java.util.Optional[Exception]
+  ): WriteResult[T, PT] = new WriteResult(message, error.asScala)
 
 }

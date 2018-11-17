@@ -8,7 +8,7 @@ import akka.NotUsed
 import akka.stream.alpakka.elasticsearch._
 import akka.stream.alpakka.elasticsearch.impl
 import akka.stream.scaladsl.Flow
-import org.elasticsearch.client.RestClient
+import org.elasticsearch.client.RestHighLevelClient
 import spray.json._
 
 /**
@@ -23,7 +23,7 @@ object ElasticsearchFlow {
   def create[T](indexName: String,
                 typeName: String,
                 settings: ElasticsearchWriteSettings = ElasticsearchWriteSettings.Default)(
-      implicit client: RestClient,
+      implicit client: RestHighLevelClient,
       writer: JsonWriter[T]
   ): Flow[WriteMessage[T, NotUsed], Seq[WriteResult[T, NotUsed]], NotUsed] =
     create[T](indexName, typeName, settings, new SprayJsonWriter[T]()(writer))
@@ -33,7 +33,7 @@ object ElasticsearchFlow {
    * of [[WriteResult]].
    */
   def create[T](indexName: String, typeName: String, settings: ElasticsearchWriteSettings, writer: MessageWriter[T])(
-      implicit client: RestClient
+      implicit client: RestHighLevelClient
   ): Flow[WriteMessage[T, NotUsed], Seq[WriteResult[T, NotUsed]], NotUsed] =
     Flow
       .fromGraph(
@@ -54,7 +54,7 @@ object ElasticsearchFlow {
   def createWithPassThrough[T, C](indexName: String,
                                   typeName: String,
                                   settings: ElasticsearchWriteSettings = ElasticsearchWriteSettings.Default)(
-      implicit client: RestClient,
+      implicit client: RestHighLevelClient,
       writer: JsonWriter[T]
   ): Flow[WriteMessage[T, C], Seq[WriteResult[T, C]], NotUsed] =
     createWithPassThrough[T, C](indexName, typeName, settings, new SprayJsonWriter[T]()(writer))
@@ -67,7 +67,7 @@ object ElasticsearchFlow {
                                   typeName: String,
                                   settings: ElasticsearchWriteSettings,
                                   writer: MessageWriter[T])(
-      implicit client: RestClient
+      implicit client: RestHighLevelClient
   ): Flow[WriteMessage[T, C], Seq[WriteResult[T, C]], NotUsed] =
     Flow
       .fromGraph(

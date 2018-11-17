@@ -4,19 +4,21 @@
 
 package akka.stream.alpakka.elasticsearch.impl
 
-import java.nio.charset.StandardCharsets
-
 import akka.annotation.InternalApi
 import akka.stream.alpakka.elasticsearch.Operation._
 import akka.stream.alpakka.elasticsearch._
 import akka.stream.alpakka.elasticsearch.impl.ElasticsearchFlowStage._
 import akka.stream.stage._
 import akka.stream.{Attributes, FlowShape, Inlet, Outlet}
-import org.apache.http.entity.StringEntity
-import org.apache.http.message.BasicHeader
-import org.apache.http.util.EntityUtils
-import org.elasticsearch.client.{Response, ResponseListener, RestClient}
-import spray.json._
+import org.elasticsearch.action.ActionListener
+import org.elasticsearch.action.bulk.{BulkRequest, BulkResponse}
+import org.elasticsearch.action.delete.DeleteRequest
+import org.elasticsearch.action.index.IndexRequest
+import org.elasticsearch.action.update.UpdateRequest
+import org.elasticsearch.client.RestHighLevelClient
+import org.elasticsearch.common.lucene.uid.Versions
+import org.elasticsearch.common.xcontent.XContentType
+import org.elasticsearch.index.VersionType
 
 import scala.collection.mutable
 import scala.concurrent.Future
@@ -28,7 +30,7 @@ import scala.concurrent.Future
 private[elasticsearch] final class ElasticsearchFlowStage[T, C](
     indexName: String,
     typeName: String,
-    client: RestClient,
+    client: RestHighLevelClient,
     settings: ElasticsearchWriteSettings,
     writer: MessageWriter[T]
 ) extends GraphStage[FlowShape[WriteMessage[T, C], Future[Seq[WriteResult[T, C]]]]] {
@@ -42,8 +44,8 @@ private[elasticsearch] final class ElasticsearchFlowStage[T, C](
 
       private var state: State = Idle
       private val queue = new mutable.Queue[WriteMessage[T, C]]()
-      private val failureHandler = getAsyncCallback[(Seq[WriteMessage[T, C]], Throwable)](handleFailure)
-      private val responseHandler = getAsyncCallback[(Seq[WriteMessage[T, C]], Response)](handleResponse)
+      private val failureHandler = getAsyncCallback[(Seq[WriteMessage[T, C]], Exception)](handleFailure)
+      private val responseHandler = getAsyncCallback[(Seq[WriteMessage[T, C]], BulkResponse)](handleResponse)
       private var failedMessages: Seq[WriteMessage[T, C]] = Nil
       private var retryCount: Int = 0
 
@@ -60,9 +62,9 @@ private[elasticsearch] final class ElasticsearchFlowStage[T, C](
         failedMessages = Nil
       }
 
-      private def handleFailure(args: (Seq[WriteMessage[T, C]], Throwable)): Unit = {
+      private def handleFailure(args: (Seq[WriteMessage[T, C]], Exception)): Unit = {
         val (messages, exception) = args
-        if (!settings.retryLogic.shouldRetry(retryCount, List(exception.toString))) {
+        if (!settings.retryLogic.shouldRetry(retryCount, List(exception))) {
           log.error("Received error from elastic. Giving up after {} tries. {}, Error: {}",
                     retryCount,
                     settings.retryLogic,
@@ -82,17 +84,19 @@ private[elasticsearch] final class ElasticsearchFlowStage[T, C](
       private def handleSuccess(): Unit =
         completeStage()
 
-      private def handleResponse(args: (Seq[WriteMessage[T, C]], Response)): Unit = {
+      private def handleResponse(args: (Seq[WriteMessage[T, C]], BulkResponse)): Unit = {
         val (messages, response) = args
-        val responseJson = EntityUtils.toString(response.getEntity).parseJson
 
         // If some commands in bulk request failed, pass failed messages to follows.
-        val items = responseJson.asJsObject.fields("items").asInstanceOf[JsArray]
-        val messageResults: Seq[WriteResult[T, C]] = items.elements.zip(messages).map {
+        val items = response.getItems // responseJson.asJsObject.fields("items").asInstanceOf[JsArray]
+        val messageResults: Seq[WriteResult[T, C]] = items.zip(messages).map {
           case (item, message) =>
-            val command = message.operation.command
-            val res = item.asJsObject.fields(command).asJsObject
-            val error: Option[String] = res.fields.get("error").map(_.toString())
+            val error =
+              if (item.isFailed)
+                Some(item.getFailure.getCause)
+              else
+                None
+
             new WriteResult(message, error)
         }
 
@@ -145,93 +149,131 @@ private[elasticsearch] final class ElasticsearchFlowStage[T, C](
       }
 
       private def sendBulkUpdateRequest(messages: Seq[WriteMessage[T, C]]): Unit = {
-        val json = messages
-          .map { message =>
-            val indexNameToUse: String = message.indexName.getOrElse(indexName)
-            val additionalMetadata = message.customMetadata.map { case (field, value) => field -> JsString(value) }
+        val versionType = VersionType.fromString(settings.versionType.getOrElse("internal"))
+        val request = new BulkRequest()
 
-            JsObject(message.operation match {
-              case Index =>
-                "index" -> JsObject(
-                  (Seq(
-                    Option("_index" -> JsString(indexNameToUse)),
-                    Option("_type" -> JsString(typeName)),
-                    message.version.map { version =>
-                      "_version" -> JsNumber(version)
-                    },
-                    settings.versionType.map { versionType =>
-                      "version_type" -> JsString(versionType)
-                    },
-                    message.id.map { id =>
-                      "_id" -> JsString(id)
-                    }
-                  ).flatten ++ additionalMetadata): _*
-                )
-              case Update | Upsert =>
-                "update" -> JsObject(
-                  (Seq(
-                    Option("_index" -> JsString(indexNameToUse)),
-                    Option("_type" -> JsString(typeName)),
-                    message.version.map { version =>
-                      "_version" -> JsNumber(version)
-                    },
-                    settings.versionType.map { versionType =>
-                      "version_type" -> JsString(versionType)
-                    },
-                    Option("_id" -> JsString(message.id.get))
-                  ).flatten ++ additionalMetadata): _*
-                )
-              case Delete =>
-                "delete" -> JsObject(
-                  (Seq(
-                    Option("_index" -> JsString(indexNameToUse)),
-                    Option("_type" -> JsString(typeName)),
-                    message.version.map { version =>
-                      "_version" -> JsNumber(version)
-                    },
-                    settings.versionType.map { versionType =>
-                      "version_type" -> JsString(versionType)
-                    },
-                    Option("_id" -> JsString(message.id.get))
-                  ).flatten ++ additionalMetadata): _*
-                )
-            }).toString + messageToJsonString(message)
+        messages.foreach { message =>
+          val indexNameToUse: String = message.indexName.getOrElse(indexName)
+
+          val req = message.operation match {
+            case Index =>
+              new IndexRequest(indexNameToUse, typeName, message.id.orNull)
+                .source(writer.convert(message.source.get), XContentType.JSON)
+                .version(message.version.getOrElse(Versions.MATCH_ANY))
+                .versionType(versionType)
+            case Update | Upsert =>
+              new UpdateRequest(indexNameToUse, typeName, message.id.get)
+                .doc(writer.convert(message.source.get), XContentType.JSON)
+                .docAsUpsert(message.operation == Upsert)
+                .version(message.version.getOrElse(Versions.MATCH_ANY))
+                .versionType(versionType)
+            case Delete =>
+              new DeleteRequest(indexNameToUse, typeName, message.id.get)
+                .version(message.version.getOrElse(Versions.MATCH_ANY))
+                .versionType(versionType)
           }
-          .mkString("", "\n", "\n")
 
-        log.debug("Posting data to Elasticsearch: {}", json)
+          request.add(req)
+        }
 
-        client.performRequestAsync(
-          "POST",
-          "/_bulk",
-          java.util.Collections.emptyMap[String, String](),
-          new StringEntity(json, StandardCharsets.UTF_8),
-          new ResponseListener() {
+        log.debug("Posting data to Elasticsearch: {}", request.toString)
+
+        client.bulkAsync(
+          request,
+          new ActionListener[BulkResponse] {
+            override def onResponse(response: BulkResponse): Unit =
+              responseHandler.invoke((messages, response))
             override def onFailure(exception: Exception): Unit =
               failureHandler.invoke((messages, exception))
-            override def onSuccess(response: Response): Unit =
-              responseHandler.invoke((messages, response))
-          },
-          new BasicHeader("Content-Type", "application/x-ndjson")
+          }
         )
+//        val json = messages
+//          .map { message =>
+//            val indexNameToUse: String = message.indexName.getOrElse(indexName)
+//            val additionalMetadata = message.customMetadata.map { case (field, value) => field -> JsString(value) }
+//
+//            JsObject(message.operation match {
+//              case Index =>
+//                "index" -> JsObject(
+//                  (Seq(
+//                    Option("_index" -> JsString(indexNameToUse)),
+//                    Option("_type" -> JsString(typeName)),
+//                    message.version.map { version =>
+//                      "_version" -> JsNumber(version)
+//                    },
+//                    settings.versionType.map { versionType =>
+//                      "version_type" -> JsString(versionType)
+//                    },
+//                    message.id.map { id =>
+//                      "_id" -> JsString(id)
+//                    }
+//                  ).flatten ++ additionalMetadata): _*
+//                )
+//              case Update | Upsert =>
+//                "update" -> JsObject(
+//                  (Seq(
+//                    Option("_index" -> JsString(indexNameToUse)),
+//                    Option("_type" -> JsString(typeName)),
+//                    message.version.map { version =>
+//                      "_version" -> JsNumber(version)
+//                    },
+//                    settings.versionType.map { versionType =>
+//                      "version_type" -> JsString(versionType)
+//                    },
+//                    Option("_id" -> JsString(message.id.get))
+//                  ).flatten ++ additionalMetadata): _*
+//                )
+//              case Delete =>
+//                "delete" -> JsObject(
+//                  (Seq(
+//                    Option("_index" -> JsString(indexNameToUse)),
+//                    Option("_type" -> JsString(typeName)),
+//                    message.version.map { version =>
+//                      "_version" -> JsNumber(version)
+//                    },
+//                    settings.versionType.map { versionType =>
+//                      "version_type" -> JsString(versionType)
+//                    },
+//                    Option("_id" -> JsString(message.id.get))
+//                  ).flatten ++ additionalMetadata): _*
+//                )
+//            }).toString + messageToJsonString(message)
+//          }
+//          .mkString("", "\n", "\n")
+
+//        log.debug("Posting data to Elasticsearch: {}", json)
+
+//        client.performRequestAsync(
+//          "POST",
+//          "/_bulk",
+//          java.util.Collections.emptyMap[String, String](),
+//          new StringEntity(json, StandardCharsets.UTF_8),
+//          new ResponseListener() {
+//            override def onFailure(exception: Exception): Unit =
+//              failureHandler.invoke((messages, exception))
+//            override def onSuccess(response: Response): Unit =
+//              responseHandler.invoke((messages, response))
+//          },
+//          new BasicHeader("Content-Type", "application/x-ndjson")
+//        )
       }
 
-      private def messageToJsonString(message: WriteMessage[T, C]): String =
-        message.operation match {
-          case Index =>
-            "\n" + writer.convert(message.source.get)
-          case Upsert =>
-            "\n" + JsObject(
-              "doc" -> writer.convert(message.source.get).parseJson,
-              "doc_as_upsert" -> JsTrue
-            ).toString
-          case Update =>
-            "\n" + JsObject(
-              "doc" -> writer.convert(message.source.get).parseJson
-            ).toString
-          case Delete =>
-            ""
-        }
+//      private def messageToJsonString(message: WriteMessage[T, C]): String =
+//        message.operation match {
+//          case Index =>
+//            "\n" + writer.convert(message.source.get)
+//          case Upsert =>
+//            "\n" + JsObject(
+//              "doc" -> writer.convert(message.source.get).parseJson,
+//              "doc_as_upsert" -> JsTrue
+//            ).toString
+//          case Update =>
+//            "\n" + JsObject(
+//              "doc" -> writer.convert(message.source.get).parseJson
+//            ).toString
+//          case Delete =>
+//            ""
+//        }
 
       setHandlers(in, out, this)
 

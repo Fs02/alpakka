@@ -6,11 +6,11 @@ package akka.stream.alpakka.elasticsearch.javadsl
 
 import java.util.concurrent.CompletionStage
 
-import akka.{Done, NotUsed}
 import akka.stream.alpakka.elasticsearch._
 import akka.stream.javadsl._
+import akka.{Done, NotUsed}
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.elasticsearch.client.RestClient
+import org.elasticsearch.client.RestHighLevelClient
 
 /**
  * Java API to create Elasticsearch sinks.
@@ -24,7 +24,7 @@ object ElasticsearchSink {
       indexName: String,
       typeName: String,
       settings: ElasticsearchWriteSettings,
-      client: RestClient,
+      client: RestHighLevelClient,
       objectMapper: ObjectMapper
   ): akka.stream.javadsl.Sink[WriteMessage[T, NotUsed], CompletionStage[Done]] =
     ElasticsearchFlow

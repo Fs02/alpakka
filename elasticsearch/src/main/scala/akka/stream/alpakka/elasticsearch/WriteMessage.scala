@@ -128,14 +128,14 @@ object WriteMessage {
  * [[akka.stream.alpakka.elasticsearch.testkit.MessageFactory]].
  */
 final class WriteResult[T2, C2] @InternalApi private[elasticsearch] (val message: WriteMessage[T2, C2],
-                                                                     val error: Option[String]) {
+                                                                     val error: Option[Exception]) {
   val success: Boolean = error.isEmpty
 
   /** Java API */
-  def getError: java.util.Optional[String] = error.asJava
+  def getError: java.util.Optional[Exception] = error.asJava
 
   override def toString =
-    s"""WriteResult(message=$message,error=$error)"""
+    s"""WriteResult(message=$message,error=${error.toString})"""
 
   override def equals(other: Any): Boolean = other match {
     case that: WriteResult[T2, C2] =>

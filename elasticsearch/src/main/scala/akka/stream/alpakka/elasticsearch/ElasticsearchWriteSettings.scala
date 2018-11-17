@@ -9,12 +9,12 @@ import scala.collection.immutable
 import akka.util.JavaDurationConverters._
 
 trait RetryLogic {
-  def shouldRetry(retries: Int, errors: immutable.Seq[String]): Boolean
+  def shouldRetry(retries: Int, errors: immutable.Seq[Exception]): Boolean
   def nextRetry(retries: Int): FiniteDuration
 }
 
 object RetryNever extends RetryLogic {
-  override def shouldRetry(retries: Int, errors: immutable.Seq[String]): Boolean = false
+  override def shouldRetry(retries: Int, errors: immutable.Seq[Exception]): Boolean = false
   override def nextRetry(retries: Int): FiniteDuration = Duration.Zero
 }
 
@@ -26,7 +26,7 @@ object RetryNever extends RetryLogic {
  */
 final class RetryAtFixedRate private (maxRetries: Int, retryInterval: scala.concurrent.duration.FiniteDuration)
     extends RetryLogic {
-  override def shouldRetry(retries: Int, errors: immutable.Seq[String]): Boolean = retries < maxRetries
+  override def shouldRetry(retries: Int, errors: immutable.Seq[Exception]): Boolean = retries < maxRetries
   override def nextRetry(retries: Int): FiniteDuration = retryInterval
 }
 

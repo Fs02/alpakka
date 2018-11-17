@@ -8,7 +8,7 @@ import akka.NotUsed
 import akka.stream.alpakka.elasticsearch._
 import akka.stream.scaladsl.Flow
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.elasticsearch.client.RestClient
+import org.elasticsearch.client.RestHighLevelClient
 
 import scala.collection.JavaConverters._
 
@@ -26,7 +26,7 @@ object ElasticsearchFlow {
       indexName: String,
       typeName: String,
       settings: ElasticsearchWriteSettings,
-      client: RestClient,
+      client: RestHighLevelClient,
       objectMapper: ObjectMapper
   ): akka.stream.javadsl.Flow[WriteMessage[T, NotUsed], java.util.List[WriteResult[T, NotUsed]], NotUsed] =
     Flow
@@ -49,7 +49,7 @@ object ElasticsearchFlow {
       indexName: String,
       typeName: String,
       settings: ElasticsearchWriteSettings,
-      client: RestClient,
+      client: RestHighLevelClient,
       objectMapper: ObjectMapper
   ): akka.stream.javadsl.Flow[WriteMessage[T, C], java.util.List[WriteResult[T, C]], NotUsed] =
     Flow
