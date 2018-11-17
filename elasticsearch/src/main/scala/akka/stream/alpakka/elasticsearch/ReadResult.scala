@@ -41,3 +41,11 @@ final class ReadResult[T] @InternalApi private[elasticsearch] (val id: String,
         java.util.Objects.hash(id, version)
     }
 }
+
+/**
+ * INTERNAL API
+ */
+@InternalApi
+private[elasticsearch] trait MessageReader[T] {
+  def convert(json: String): T
+}

@@ -4,19 +4,15 @@
 
 package akka.stream.alpakka.elasticsearch.impl
 
-import java.io.ByteArrayOutputStream
-
 import akka.annotation.InternalApi
-import akka.stream.alpakka.elasticsearch.{ElasticsearchSourceSettings, ReadResult}
+import akka.stream.alpakka.elasticsearch.{ElasticsearchSourceSettings, MessageReader, ReadResult}
 import akka.stream.stage.{GraphStage, GraphStageLogic, OutHandler, StageLogging}
 import akka.stream.{Attributes, Outlet, SourceShape}
-import org.apache.http.entity.StringEntity
-import org.apache.http.message.BasicHeader
-import org.elasticsearch.client.{Response, ResponseListener, RestClient}
-import spray.json.DefaultJsonProtocol._
-import spray.json._
-
-import scala.collection.JavaConverters._
+import org.elasticsearch.action.ActionListener
+import org.elasticsearch.action.search.{SearchRequest, SearchResponse, SearchScrollRequest}
+import org.elasticsearch.client.RestHighLevelClient
+import org.elasticsearch.common.unit.TimeValue
+import org.elasticsearch.search.builder.SearchSourceBuilder
 
 /**
  * INTERNAL API
@@ -34,18 +30,10 @@ private[elasticsearch] case class ScrollResult[T](scrollId: String, messages: Se
  * INTERNAL API
  */
 @InternalApi
-private[elasticsearch] trait MessageReader[T] {
-  def convert(json: String): ScrollResponse[T]
-}
-
-/**
- * INTERNAL API
- */
-@InternalApi
 private[elasticsearch] final class ElasticsearchSourceStage[T](indexName: String,
                                                                typeName: Option[String],
-                                                               searchParams: Map[String, String],
-                                                               client: RestClient,
+                                                               searchSourceBuilder: SearchSourceBuilder,
+                                                               client: RestHighLevelClient,
                                                                settings: ElasticsearchSourceSettings,
                                                                reader: MessageReader[T])
     extends GraphStage[SourceShape[ReadResult[T]]] {
@@ -54,7 +42,7 @@ private[elasticsearch] final class ElasticsearchSourceStage[T](indexName: String
   override val shape: SourceShape[ReadResult[T]] = SourceShape(out)
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
-    new ElasticsearchSourceLogic[T](indexName, typeName, searchParams, client, settings, out, shape, reader)
+    new ElasticsearchSourceLogic[T](indexName, typeName, searchSourceBuilder, client, settings, out, shape, reader)
 
 }
 
@@ -64,19 +52,19 @@ private[elasticsearch] final class ElasticsearchSourceStage[T](indexName: String
 @InternalApi
 private[elasticsearch] final class ElasticsearchSourceLogic[T](indexName: String,
                                                                typeName: Option[String],
-                                                               searchParams: Map[String, String],
-                                                               client: RestClient,
+                                                               searchSourceBuilder: SearchSourceBuilder,
+                                                               client: RestHighLevelClient,
                                                                settings: ElasticsearchSourceSettings,
                                                                out: Outlet[ReadResult[T]],
                                                                shape: SourceShape[ReadResult[T]],
                                                                reader: MessageReader[T])
     extends GraphStageLogic(shape)
-    with ResponseListener
+    with ActionListener[SearchResponse]
     with OutHandler
     with StageLogging {
 
   private var scrollId: String = null
-  private val responseHandler = getAsyncCallback[Response](handleResponse)
+  private val responseHandler = getAsyncCallback[SearchResponse](handleResponse)
   private val failureHandler = getAsyncCallback[Throwable](handleFailure)
 
   private var waitingForElasticData = false
@@ -90,81 +78,62 @@ private[elasticsearch] final class ElasticsearchSourceLogic[T](indexName: String
       if (scrollId == null) {
         log.debug("Doing initial search")
 
-        // Add extra params to search
-        val extraParams = Seq(
-          if (!searchParams.contains("size")) {
-            Some(("size" -> settings.bufferSize.toString))
-          } else {
-            None
-          },
-          // Tell elastic to return the documents '_version'-property with the search-results
-          // http://nocf-www.elastic.co/guide/en/elasticsearch/reference/current/search-request-version.html
-          // https://www.elastic.co/guide/en/elasticsearch/guide/current/optimistic-concurrency-control.html
-          if (!searchParams.contains("version") && settings.includeDocumentVersion) {
-            Some(("version" -> "true"))
-          } else {
-            None
-          }
-        )
-
-        val completeParams = searchParams ++ extraParams.flatten
-
-        val searchBody = "{" + completeParams
-          .map {
-            case (name, json) =>
-              "\"" + name + "\":" + json
-          }
-          .mkString(",") + "}"
-
-        val endpoint: String = (indexName, typeName) match {
-          case (i, Some(t)) => s"/$i/$t/_search"
-          case (i, None) => s"/$i/_search"
+        if (searchSourceBuilder.size() < 0) {
+          searchSourceBuilder.size(settings.bufferSize)
         }
-        client.performRequestAsync(
-          "POST",
-          endpoint,
-          Map("scroll" -> "5m", "sort" -> "_doc").asJava,
-          new StringEntity(searchBody),
-          this,
-          new BasicHeader("Content-Type", "application/json")
-        )
+
+        if (searchSourceBuilder.version() == null) {
+          searchSourceBuilder.version(settings.includeDocumentVersion)
+        }
+
+        if (searchSourceBuilder.sorts() == null) {
+          searchSourceBuilder.sort("_doc")
+        }
+
+        val searchRequest = new SearchRequest(indexName)
+        searchRequest.source(searchSourceBuilder)
+        searchRequest.scroll(TimeValue.timeValueMinutes(5))
+
+        if (typeName.isDefined) {
+          searchRequest.types(typeName.get)
+        }
+
+        client.searchAsync(searchRequest, this)
       } else {
         log.debug("Fetching next scroll")
 
-        client.performRequestAsync(
-          "POST",
-          s"/_search/scroll",
-          Map[String, String]().asJava,
-          new StringEntity(Map("scroll" -> "5m", "scroll_id" -> scrollId).toJson.toString),
-          this,
-          new BasicHeader("Content-Type", "application/json")
-        )
+        val scrollRequest = new SearchScrollRequest(scrollId)
+        scrollRequest.scroll(TimeValue.timeValueMinutes(5))
+
+        client.searchScrollAsync(scrollRequest, this)
       }
     } catch {
       case ex: Exception => handleFailure(ex)
     }
 
   override def onFailure(exception: Exception) = failureHandler.invoke(exception)
-  override def onSuccess(response: Response) = responseHandler.invoke(response)
+  override def onResponse(response: SearchResponse) = responseHandler.invoke(response)
 
   def handleFailure(ex: Throwable): Unit = {
     waitingForElasticData = false
     failStage(ex)
   }
 
-  def handleResponse(res: Response): Unit = {
+  def handleResponse(res: SearchResponse): Unit = {
     waitingForElasticData = false
-    val json = {
-      val out = new ByteArrayOutputStream()
-      try {
-        res.getEntity.writeTo(out)
-        new String(out.toByteArray, "UTF-8")
-      } finally {
-        out.close()
-      }
-    }
 
-    val scrollResponse = reader.convert(json)
+    val scrollResponse = if (res.getFailedShards > 0) {
+      val error = res.getShardFailures.map(_.reason()).mkString(",")
+      new ScrollResponse[T](Some(error), None)
+    } else {
+      val messages = res.getHits.getHits.map { hit =>
+        val version = if (hit.getVersion < 0) None else Some(hit.getVersion)
+        new ReadResult[T](hit.getId, reader.convert(hit.getSourceAsString), version)
+      }
+
+      val scrollResult = ScrollResult[T](res.getScrollId, messages = messages)
+      new ScrollResponse[T](None, Some(scrollResult))
+    }
 
     if (pullIsWaitingForData) {
       log.debug("Received data from elastic. Downstream has already called pull and is waiting for data")

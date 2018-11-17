@@ -7,14 +7,9 @@ package akka.stream.alpakka.elasticsearch.javadsl
 import akka.NotUsed
 import akka.stream.alpakka.elasticsearch._
 import akka.stream.javadsl.Source
-import org.elasticsearch.client.RestClient
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.node.{ArrayNode, NumericNode}
-import java.util.{Map => JMap}
-
-import akka.stream.alpakka.elasticsearch.impl
-
-import scala.collection.JavaConverters._
+import org.elasticsearch.client.RestHighLevelClient
+import org.elasticsearch.search.builder.SearchSourceBuilder
 
 /**
  * Java API to create Elasticsearch sources.
@@ -27,31 +22,9 @@ object ElasticsearchSource {
    */
   def create(indexName: String,
              typeName: String,
-             query: String,
              settings: ElasticsearchSourceSettings,
-             client: RestClient): Source[ReadResult[java.util.Map[String, Object]], NotUsed] =
-    create(indexName, typeName, query, settings, client, new ObjectMapper())
-
-  /**
-   * Creates a [[akka.stream.javadsl.Source]] from Elasticsearch that streams [[ReadResult]]s of [[java.util.Map]].
-   * Using custom objectMapper
-   */
-  def create(indexName: String,
-             typeName: String,
-             query: String,
-             settings: ElasticsearchSourceSettings,
-             client: RestClient,
-             objectMapper: ObjectMapper): Source[ReadResult[java.util.Map[String, Object]], NotUsed] =
-    Source.fromGraph(
-      new impl.ElasticsearchSourceStage(
-        indexName,
-        Option(typeName),
-        Map("query" -> query),
-        client,
-        settings,
-        new JacksonReader[java.util.Map[String, Object]](objectMapper, classOf[java.util.Map[String, Object]])
-      )
-    )
+             client: RestHighLevelClient): Source[ReadResult[java.util.Map[String, Object]], NotUsed] =
+    create(indexName, typeName, new SearchSourceBuilder(), settings, client, new ObjectMapper())
 
   /**
    * Creates a [[akka.stream.javadsl.Source]] from Elasticsearch that streams [[ReadResult]]s of [[java.util.Map]].
@@ -65,15 +38,15 @@ object ElasticsearchSource {
    */
   def create(indexName: String,
              typeName: String,
-             searchParams: JMap[String, String],
+             searchSourceBuilder: SearchSourceBuilder,
              settings: ElasticsearchSourceSettings,
-             client: RestClient,
+             client: RestHighLevelClient,
              objectMapper: ObjectMapper): Source[ReadResult[java.util.Map[String, Object]], NotUsed] =
     Source.fromGraph(
       new impl.ElasticsearchSourceStage(
         indexName,
         Option(typeName),
-        searchParams.asScala.toMap,
+        searchSourceBuilder,
         client,
         settings,
         new JacksonReader[java.util.Map[String, Object]](objectMapper, classOf[java.util.Map[String, Object]])
@@ -86,33 +59,10 @@ object ElasticsearchSource {
    */
   def typed[T](indexName: String,
                typeName: String,
-               query: String,
                settings: ElasticsearchSourceSettings,
-               client: RestClient,
+               client: RestHighLevelClient,
                clazz: Class[T]): Source[ReadResult[T], NotUsed] =
-    typed[T](indexName, typeName, query, settings, client, clazz, new ObjectMapper())
-
-  /**
-   * Creates a [[akka.stream.javadsl.Source]] from Elasticsearch that streams [[ReadResult]]s of type `T`.
-   * Using custom objectMapper
-   */
-  def typed[T](indexName: String,
-               typeName: String,
-               query: String,
-               settings: ElasticsearchSourceSettings,
-               client: RestClient,
-               clazz: Class[T],
-               objectMapper: ObjectMapper): Source[ReadResult[T], NotUsed] =
-    Source.fromGraph(
-      new impl.ElasticsearchSourceStage(
-        indexName,
-        Option(typeName),
-        Map("query" -> query),
-        client,
-        settings,
-        new JacksonReader[T](objectMapper, clazz)
-      )
-    )
+    typed[T](indexName, typeName, new SearchSourceBuilder(), settings, client, clazz, new ObjectMapper())
 
   /**
    * Creates a [[akka.stream.javadsl.Source]] from Elasticsearch that streams [[ReadResult]]s of type `T`.
@@ -126,46 +76,26 @@ object ElasticsearchSource {
    */
   def typed[T](indexName: String,
                typeName: String,
-               searchParams: JMap[String, String],
+               searchSourceBuilder: SearchSourceBuilder,
                settings: ElasticsearchSourceSettings,
-               client: RestClient,
+               client: RestHighLevelClient,
                clazz: Class[T],
                objectMapper: ObjectMapper): Source[ReadResult[T], NotUsed] =
     Source.fromGraph(
       new impl.ElasticsearchSourceStage(
         indexName,
         Option(typeName),
-        searchParams.asScala.toMap,
+        searchSourceBuilder,
         client,
         settings,
         new JacksonReader[T](objectMapper, clazz)
       )
     )
 
-  private final class JacksonReader[T](mapper: ObjectMapper, clazz: Class[T]) extends impl.MessageReader[T] {
+  private final class JacksonReader[T](mapper: ObjectMapper, clazz: Class[T]) extends MessageReader[T] {
 
-    override def convert(json: String): impl.ScrollResponse[T] = {
+    override def convert(json: String): T = mapper.readValue(json, clazz)
 
-      val jsonTree = mapper.readTree(json)
-
-      if (jsonTree.has("error")) {
-        impl.ScrollResponse(Some(jsonTree.get("error").asText()), None)
-      } else {
-        val scrollId = jsonTree.get("_scroll_id").asText()
-        val hits = jsonTree.get("hits").get("hits").asInstanceOf[ArrayNode]
-        val messages = hits.elements().asScala.toList.map { element =>
-          val id = element.get("_id").asText()
-          val source = element.get("_source")
-          val version: Option[Long] = element.get("_version") match {
-            case n: NumericNode => Some(n.asLong())
-            case _ => None
-          }
-
-          new ReadResult[T](id, mapper.treeToValue(source, clazz), version)
-        }
-        impl.ScrollResponse(None, Some(impl.ScrollResult(scrollId, messages)))
-      }
-    }
   }
 
 }

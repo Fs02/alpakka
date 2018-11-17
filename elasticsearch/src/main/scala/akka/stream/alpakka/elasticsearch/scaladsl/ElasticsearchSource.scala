@@ -6,9 +6,9 @@ package akka.stream.alpakka.elasticsearch.scaladsl
 
 import akka.NotUsed
 import akka.stream.alpakka.elasticsearch._
-import akka.stream.alpakka.elasticsearch.impl
 import akka.stream.scaladsl.Source
-import org.elasticsearch.client.RestClient
+import org.elasticsearch.client.RestHighLevelClient
+import org.elasticsearch.search.builder.SearchSourceBuilder
 import spray.json._
 
 /**
@@ -23,10 +23,10 @@ object ElasticsearchSource {
    */
   def apply(indexName: String,
             typeName: String,
-            query: String,
+            searchSourceBuilder: SearchSourceBuilder = new SearchSourceBuilder(),
             settings: ElasticsearchSourceSettings = ElasticsearchSourceSettings.Default)(
-      implicit client: RestClient
-  ): Source[ReadResult[JsObject], NotUsed] = create(indexName, typeName, query, settings)
+      implicit client: RestHighLevelClient
+  ): Source[ReadResult[JsObject], NotUsed] = create(indexName, typeName, searchSourceBuilder, settings)
 
   /**
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s
@@ -39,10 +39,10 @@ object ElasticsearchSource {
    */
   def apply(indexName: String,
             typeName: Option[String],
-            searchParams: Map[String, String],
+            searchSourceBuilder: SearchSourceBuilder,
             settings: ElasticsearchSourceSettings)(
-      implicit client: RestClient
-  ): Source[ReadResult[JsObject], NotUsed] = create(indexName, typeName, searchParams, settings)
+      implicit client: RestHighLevelClient
+  ): Source[ReadResult[JsObject], NotUsed] = create(indexName, typeName, searchSourceBuilder, settings)
 
   /**
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s
@@ -50,20 +50,11 @@ object ElasticsearchSource {
    */
   def create(indexName: String,
              typeName: String,
-             query: String,
+             searchSourceBuilder: SearchSourceBuilder = new SearchSourceBuilder(),
              settings: ElasticsearchSourceSettings = ElasticsearchSourceSettings.Default)(
-      implicit client: RestClient
+      implicit client: RestHighLevelClient
   ): Source[ReadResult[JsObject], NotUsed] =
-    create(indexName, Option(typeName), query, settings)
-
-  /**
-   * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s
-   * of Spray's [[spray.json.JsObject]].
-   */
-  def create(indexName: String, typeName: Option[String], query: String, settings: ElasticsearchSourceSettings)(
-      implicit client: RestClient
-  ): Source[ReadResult[JsObject], NotUsed] =
-    create(indexName, typeName, Map("query" -> query), settings)
+    create(indexName, Option(typeName), searchSourceBuilder, settings)
 
   /**
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s
@@ -75,15 +66,15 @@ object ElasticsearchSource {
    */
   def create(indexName: String,
              typeName: Option[String],
-             searchParams: Map[String, String],
+             searchSourceBuilder: SearchSourceBuilder,
              settings: ElasticsearchSourceSettings)(
-      implicit client: RestClient
+      implicit client: RestHighLevelClient
   ): Source[ReadResult[JsObject], NotUsed] =
     Source.fromGraph(
       new impl.ElasticsearchSourceStage(
         indexName,
         typeName,
-        searchParams,
+        searchSourceBuilder,
         client,
         settings,
         new SprayJsonReader[JsObject]()(DefaultJsonProtocol.RootJsObjectFormat)
@@ -96,22 +87,12 @@ object ElasticsearchSource {
    */
   def typed[T](indexName: String,
                typeName: String,
-               query: String,
+               searchSourceBuilder: SearchSourceBuilder = new SearchSourceBuilder(),
                settings: ElasticsearchSourceSettings = ElasticsearchSourceSettings.Default)(
-      implicit client: RestClient,
+      implicit client: RestHighLevelClient,
       reader: JsonReader[T]
   ): Source[ReadResult[T], NotUsed] =
-    typed(indexName, Option(typeName), query, settings)
-
-  /**
-   * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s of type `T`
-   * converted by Spray's [[spray.json.JsonReader]]
-   */
-  def typed[T](indexName: String, typeName: Option[String], query: String, settings: ElasticsearchSourceSettings)(
-      implicit client: RestClient,
-      reader: JsonReader[T]
-  ): Source[ReadResult[T], NotUsed] =
-    typed(indexName, typeName, Map("query" -> query), settings)
+    typed(indexName, Option(typeName), searchSourceBuilder, settings)
 
   /**
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s of type `T`
@@ -123,43 +104,23 @@ object ElasticsearchSource {
    */
   def typed[T](indexName: String,
                typeName: Option[String],
-               searchParams: Map[String, String],
+               searchSourceBuilder: SearchSourceBuilder,
                settings: ElasticsearchSourceSettings)(
-      implicit client: RestClient,
+      implicit client: RestHighLevelClient,
       reader: JsonReader[T]
   ): Source[ReadResult[T], NotUsed] =
     Source.fromGraph(
       new impl.ElasticsearchSourceStage(indexName,
                                         typeName,
-                                        searchParams,
+                                        searchSourceBuilder,
                                         client,
                                         settings,
                                         new SprayJsonReader[T]()(reader))
     )
 
-  private final class SprayJsonReader[T](implicit reader: JsonReader[T]) extends impl.MessageReader[T] {
+  private final class SprayJsonReader[T](implicit reader: JsonReader[T]) extends MessageReader[T] {
 
-    override def convert(json: String): impl.ScrollResponse[T] = {
-      val jsObj = json.parseJson.asJsObject
-      jsObj.fields.get("error") match {
-        case Some(error) => {
-          impl.ScrollResponse(Some(error.toString), None)
-        }
-        case None => {
-          val scrollId = jsObj.fields("_scroll_id").asInstanceOf[JsString].value
-          val hits = jsObj.fields("hits").asJsObject.fields("hits").asInstanceOf[JsArray]
-          val messages = hits.elements.reverse.map { element =>
-            val doc = element.asJsObject
-            val id = doc.fields("_id").asInstanceOf[JsString].value
-            val source = doc.fields("_source").asJsObject
-            // Maybe we got the _version-property
-            val version: Option[Long] = doc.fields.get("_version").map(_.asInstanceOf[JsNumber].value.toLong)
-            new ReadResult(id, source.convertTo[T], version)
-          }
-          impl.ScrollResponse(None, Some(impl.ScrollResult(scrollId, messages)))
-        }
-      }
-    }
+    override def convert(json: String): T = json.parseJson.convertTo[T]
 
   }
 

@@ -15,6 +15,7 @@ import org.apache.http.entity.StringEntity
 import org.apache.http.message.BasicHeader
 import org.codelibs.elasticsearch.runner.ElasticsearchClusterRunner
 import org.elasticsearch.client.RestHighLevelClient
+import org.elasticsearch.search.builder.SearchSourceBuilder
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpec}
 
 import scala.collection.JavaConverters._
@@ -121,11 +122,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       // Copy source/doc to sink2/doc through typed stream
       //#run-jsobject
       val f1 = ElasticsearchSource
-        .create(
-          indexName = "source",
-          typeName = "doc",
-          query = """{"match_all": {}}"""
-        )
+        .create("source", "doc")
         .map { message: ReadResult[spray.json.JsObject] =>
           val book: Book = jsonReader[Book].read(message.source)
           WriteMessage.createIndexMessage(message.id, book)
@@ -144,11 +141,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
 
       // Assert docs in sink2/doc
       val f2 = ElasticsearchSource
-        .typed[Book](
-          "sink2",
-          "doc",
-          """{"match_all": {}}"""
-        )
+        .typed[Book]("sink2", "doc")
         .map { message =>
           message.source.title
         }
@@ -175,8 +168,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       val f1 = ElasticsearchSource
         .typed[Book](
           indexName = "source",
-          typeName = "doc",
-          query = """{"match_all": {}}"""
+          typeName = "doc"
         )
         .map { message: ReadResult[Book] =>
           WriteMessage.createIndexMessage(message.id, message.source)
@@ -196,9 +188,8 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       // Assert docs in sink2/doc
       val f2 = ElasticsearchSource
         .typed[Book](
-          "sink2",
-          "doc",
-          """{"match_all": {}}"""
+          indexName = "sink2",
+          typeName = "doc"
         )
         .map { message =>
           message.source.title
@@ -226,8 +217,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       val f1 = ElasticsearchSource
         .typed[Book](
           indexName = "source",
-          typeName = "doc",
-          query = """{"match_all": {}}"""
+          typeName = "doc"
         )
         .map { message: ReadResult[Book] =>
           WriteMessage.createIndexMessage(message.id, message.source)
@@ -250,9 +240,8 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       // Assert docs in sink3/doc
       val f2 = ElasticsearchSource
         .typed[Book](
-          "sink3",
-          "doc",
-          """{"match_all": {}}"""
+          indexName = "sink3",
+          typeName = "doc"
         )
         .map { message =>
           message.source.title
@@ -288,8 +277,8 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
         }
         .via(
           ElasticsearchFlow.create[Book](
-            "sink4",
-            "doc"
+            indexName = "sink4",
+            typeName = "doc"
           )
         )
         .runWith(Sink.seq)
@@ -302,11 +291,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
 
       // Assert docs in sink4/doc
       val f2 = ElasticsearchSource
-        .typed[Book](
-          "sink4",
-          "doc",
-          """{"match_all": {}}"""
-        )
+        .typed[Book]("sink4", "doc")
         .map { message =>
           message.source.title
         }
@@ -365,11 +350,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
 
       // Assert docs in sink5/doc
       val f2 = ElasticsearchSource
-        .typed[Book](
-          "sink5",
-          "doc",
-          """{"match_all": {}}"""
-        )
+        .typed[Book]("sink5", "doc")
         .map { message =>
           message.source.title
         }
@@ -438,11 +419,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
 
       // Assert that all docs were written to elastic
       val f2 = ElasticsearchSource
-        .typed[Book](
-          indexName = "sink6",
-          typeName = "doc",
-          """{"match_all": {}}"""
-        )
+        .typed[Book]("sink6", "doc")
         .map { message =>
           message.source.title
         }
@@ -520,8 +497,6 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       val f3 = ElasticsearchSource(
         "sink7",
         "doc",
-        """{"match_all": {}}""",
-        ElasticsearchSourceSettings.Default
       ).map { message =>
           message.source
         }
@@ -582,8 +557,6 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       val f3 = ElasticsearchSource(
         "sink8",
         "doc",
-        """{"match_all": {}}""",
-        ElasticsearchSourceSettings.Default
       ).map { message =>
           message.source
         }
@@ -641,7 +614,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
         .typed[VersionTestDoc](
           indexName,
           typeName,
-          """{"match_all": {}}""",
+          new SearchSourceBuilder(),
           ElasticsearchSourceSettings().withIncludeDocumentVersion(true)
         )
         .map { message =>
@@ -673,7 +646,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
         .typed[VersionTestDoc](
           indexName,
           typeName,
-          """{"match_all": {}}""",
+          new SearchSourceBuilder(),
           ElasticsearchSourceSettings().withIncludeDocumentVersion(true)
         )
         .map { message =>
@@ -743,7 +716,8 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
         .typed[Book](
           indexName,
           typeName,
-          """{"match_all": {}}""",
+          new SearchSourceBuilder(),
+//          """{"match_all": {}}""",
           ElasticsearchSourceSettings().withIncludeDocumentVersion(true)
         )
         .runWith(Sink.head)
@@ -764,7 +738,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
         .typed[Book](
           indexName = "source",
           typeName = "doc",
-          query = """{"match_all": {}}"""
+//          query = """{"match_all": {}}"""
         )
         .map { message: ReadResult[Book] =>
           WriteMessage
@@ -788,7 +762,7 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
         .typed[Book](
           customIndexName,
           "doc",
-          """{"match_all": {}}"""
+//          """{"match_all": {}}"""
         )
         .map { message =>
           message.source.title
@@ -815,7 +789,8 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
         .typed[Book](
           indexName = "source",
           typeName = None,
-          query = """{"match_all": {}}""",
+          searchSourceBuilder = new SearchSourceBuilder(),
+//          query = """{"match_all": {}}""",
           settings = ElasticsearchSourceSettings().withBufferSize(5)
         )
         .map(_.source.title)
@@ -877,13 +852,16 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       // Search for docs and ask elastic to only return some fields
 
       val f3 = ElasticsearchSource
-        .typed[TestDoc](indexName,
-                        Some(typeName),
-                        searchParams = Map(
-                          "query" -> """ {"match_all": {}} """,
-                          "_source" -> """ ["id", "a", "c"] """
-                        ),
-                        ElasticsearchSourceSettings.Default)
+        .typed[TestDoc](
+          indexName,
+          Some(typeName),
+          new SearchSourceBuilder().fetchSource(Array("id", "a", "c"), null),
+//                        searchParams = Map(
+//                          "query" -> """ {"match_all": {}} """,
+//                          "_source" -> """ ["id", "a", "c"] """
+//                        ),
+          ElasticsearchSourceSettings.Default
+        )
         .map { message =>
           message.source
         }
