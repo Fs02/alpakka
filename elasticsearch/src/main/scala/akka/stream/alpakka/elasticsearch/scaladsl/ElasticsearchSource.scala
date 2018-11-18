@@ -32,10 +32,6 @@ object ElasticsearchSource {
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s
    * of Spray's [[spray.json.JsObject]].
    * Alias of [[create]].
-   *
-   * Example of searchParams-usage:
-   *  Map( "query" -> """{"match_all": {}}""" )
-   *  Map( "query" -> """{"match_all": {}}""", "_source" -> """ ["fieldToInclude", "anotherFieldToInclude"] """ )
    */
   def apply(indexName: String,
             typeName: Option[String],
@@ -59,10 +55,6 @@ object ElasticsearchSource {
   /**
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s
    * of Spray's [[spray.json.JsObject]].
-   *
-   * Example of searchParams-usage:
-   *  Map( "query" -> """{"match_all": {}}""" )
-   *  Map( "query" -> """{"match_all": {}}""", "_source" -> """ ["fieldToInclude", "anotherFieldToInclude"] """ )
    */
   def create(indexName: String,
              typeName: Option[String],
@@ -97,10 +89,6 @@ object ElasticsearchSource {
   /**
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s of type `T`
    * converted by Spray's [[spray.json.JsonReader]]
-   *
-   * Example of searchParams-usage:
-   *  Map( "query" -> """{"match_all": {}}""" )
-   *  Map( "query" -> """{"match_all": {}}""", "_source" -> """ ["fieldToInclude", "anotherFieldToInclude"] """ )
    */
   def typed[T](indexName: String,
                typeName: Option[String],

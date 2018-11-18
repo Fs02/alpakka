@@ -7,6 +7,7 @@ package akka.stream.alpakka.elasticsearch
 import scala.concurrent.duration._
 import scala.collection.immutable
 import akka.util.JavaDurationConverters._
+import org.elasticsearch.index.VersionType
 
 trait RetryLogic {
   def shouldRetry(retries: Int, errors: immutable.Seq[Exception]): Boolean
@@ -44,18 +45,18 @@ object RetryAtFixedRate {
  */
 final class ElasticsearchWriteSettings private (val bufferSize: Int,
                                                 val retryLogic: RetryLogic,
-                                                val versionType: Option[String]) {
+                                                val versionType: Option[VersionType]) {
 
   def withBufferSize(value: Int): ElasticsearchWriteSettings = copy(bufferSize = value)
 
   def withRetryLogic(value: RetryLogic): ElasticsearchWriteSettings =
     copy(retryLogic = value)
 
-  def withVersionType(value: String): ElasticsearchWriteSettings = copy(versionType = Option(value))
+  def withVersionType(value: VersionType): ElasticsearchWriteSettings = copy(versionType = Option(value))
 
   private def copy(bufferSize: Int = bufferSize,
                    retryLogic: RetryLogic = retryLogic,
-                   versionType: Option[String] = versionType): ElasticsearchWriteSettings =
+                   versionType: Option[VersionType] = versionType): ElasticsearchWriteSettings =
     new ElasticsearchWriteSettings(bufferSize = bufferSize, retryLogic = retryLogic, versionType = versionType)
 
   override def toString =

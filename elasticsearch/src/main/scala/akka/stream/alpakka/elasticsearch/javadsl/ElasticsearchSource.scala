@@ -29,12 +29,6 @@ object ElasticsearchSource {
   /**
    * Creates a [[akka.stream.javadsl.Source]] from Elasticsearch that streams [[ReadResult]]s of [[java.util.Map]].
    * Using custom objectMapper.
-   *
-   * Example of searchParams-usage:
-   *
-   * Map<String, String> searchParams = new HashMap<>();
-   * searchParams.put("query", "{\"match_all\": {}}");
-   * searchParams.put("_source", "[\"fieldToInclude\", \"anotherFieldToInclude\"]");
    */
   def create(indexName: String,
              typeName: String,
@@ -67,12 +61,6 @@ object ElasticsearchSource {
   /**
    * Creates a [[akka.stream.javadsl.Source]] from Elasticsearch that streams [[ReadResult]]s of type `T`.
    * Using custom objectMapper
-   *
-   * Example of searchParams-usage:
-   *
-   * Map<String, String> searchParams = new HashMap<>();
-   * searchParams.put("query", "{\"match_all\": {}}");
-   * searchParams.put("_source", "[\"fieldToInclude\", \"anotherFieldToInclude\"]");
    */
   def typed[T](indexName: String,
                typeName: String,

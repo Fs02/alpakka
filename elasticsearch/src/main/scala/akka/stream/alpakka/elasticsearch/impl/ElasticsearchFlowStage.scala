@@ -149,37 +149,42 @@ private[elasticsearch] final class ElasticsearchFlowStage[T, C](
       }
 
       private def sendBulkUpdateRequest(messages: Seq[WriteMessage[T, C]]): Unit = {
-        val versionType = VersionType.fromString(settings.versionType.getOrElse("internal"))
-        val request = new BulkRequest()
+        val bulkRequest = new BulkRequest()
 
         messages.foreach { message =>
-          val indexNameToUse: String = message.indexName.getOrElse(indexName)
+          val request = message.request
 
-          val req = message.operation match {
+          // set version type
+          if (settings.versionType.isDefined) request.versionType(settings.versionType.get)
+
+          // set source, index and type
+          message.operation match {
             case Index =>
-              new IndexRequest(indexNameToUse, typeName, message.id.orNull)
-                .source(writer.convert(message.source.get), XContentType.JSON)
-                .version(message.version.getOrElse(Versions.MATCH_ANY))
-                .versionType(versionType)
+              val indexRequest = request.asInstanceOf[IndexRequest]
+              indexRequest.source(writer.convert(message.source.get), XContentType.JSON)
+
+              if (indexRequest.index() == null) indexRequest.index(indexName)
+              if (indexRequest.`type`() == null) indexRequest.`type`(typeName)
             case Update | Upsert =>
-              new UpdateRequest(indexNameToUse, typeName, message.id.get)
-                .doc(writer.convert(message.source.get), XContentType.JSON)
-                .docAsUpsert(message.operation == Upsert)
-                .version(message.version.getOrElse(Versions.MATCH_ANY))
-                .versionType(versionType)
+              val updateRequest = request.asInstanceOf[UpdateRequest]
+              updateRequest.doc(writer.convert(message.source.get), XContentType.JSON)
+
+              if (updateRequest.index() == null) updateRequest.index(indexName)
+              if (updateRequest.`type`() == null) updateRequest.`type`(typeName)
             case Delete =>
-              new DeleteRequest(indexNameToUse, typeName, message.id.get)
-                .version(message.version.getOrElse(Versions.MATCH_ANY))
-                .versionType(versionType)
+              val deleteRequest = request.asInstanceOf[DeleteRequest]
+
+              if (deleteRequest.index() == null) deleteRequest.index(indexName)
+              if (deleteRequest.`type`() == null) deleteRequest.`type`(typeName)
           }
 
-          request.add(req)
+          bulkRequest.add(request)
         }
 
-        log.debug("Posting data to Elasticsearch: {}", request.toString)
+        log.debug("Posting data to Elasticsearch: {}", bulkRequest.toString)
 
         client.bulkAsync(
-          request,
+          bulkRequest,
           new ActionListener[BulkResponse] {
             override def onResponse(response: BulkResponse): Unit =
               responseHandler.invoke((messages, response))

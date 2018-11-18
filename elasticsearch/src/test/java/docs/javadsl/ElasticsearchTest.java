@@ -21,10 +21,13 @@ import org.apache.http.entity.StringEntity;
 import org.apache.http.message.BasicHeader;
 import org.codelibs.elasticsearch.runner.ElasticsearchClusterRunner;
 // #init-client
+import org.elasticsearch.action.index.IndexRequest;
+import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.client.RestClient;
 import org.apache.http.HttpHost;
 // #init-client
 import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.index.VersionType;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -120,7 +123,7 @@ public class ElasticsearchTest {
     ElasticsearchWriteSettings settings =
         ElasticsearchWriteSettings.create()
             .withBufferSize(10)
-            .withVersionType("internal")
+            .withVersionType(VersionType.INTERNAL)
             .withRetryLogic(RetryAtFixedRate.create(5, Duration.ofSeconds(1)));
     // #sink-settings
   }
@@ -367,11 +370,7 @@ public class ElasticsearchTest {
     // Assert that all docs were written to elastic
     List<String> result2 =
         ElasticsearchSource.typed(
-                "sink6",
-                "doc",
-                ElasticsearchSourceSettings.create(),
-                client,
-                Book.class)
+                "sink6", "doc", ElasticsearchSourceSettings.create(), client, Book.class)
             .map(m -> m.source().title)
             .runWith(Sink.seq(), materializer) // Run it
             .toCompletableFuture()
@@ -423,7 +422,10 @@ public class ElasticsearchTest {
     flush(indexName);
 
     // Update document to version 2
-    Source.single(WriteMessage.createIndexMessage("1", book).withVersion(1L))
+    IndexRequest request1 = new IndexRequest();
+    request1.version(1L);
+
+    Source.single(WriteMessage.createIndexMessage("1", book, request1))
         .via(
             ElasticsearchFlow.create(
                 indexName,
@@ -439,8 +441,11 @@ public class ElasticsearchTest {
 
     // Try to update document with wrong version to assert that we can send it
     long oldVersion = 1;
+    IndexRequest request2 = new IndexRequest();
+    request2.version(1L);
+
     boolean success =
-        Source.single(WriteMessage.createIndexMessage("1", book).withVersion(oldVersion))
+        Source.single(WriteMessage.createIndexMessage("1", book, request2))
             .via(
                 ElasticsearchFlow.create(
                     indexName,
@@ -467,13 +472,18 @@ public class ElasticsearchTest {
     String docId = "1";
     long externalVersion = 5;
 
+    IndexRequest request = new IndexRequest();
+    request.version(externalVersion);
+
     // Insert new document using external version
-    Source.single(WriteMessage.createIndexMessage("1", book).withVersion(externalVersion))
+    Source.single(WriteMessage.createIndexMessage("1", book, request))
         .via(
             ElasticsearchFlow.create(
                 indexName,
                 typeName,
-                ElasticsearchWriteSettings.create().withBufferSize(5).withVersionType("external"),
+                ElasticsearchWriteSettings.create()
+                    .withBufferSize(5)
+                    .withVersionType(VersionType.EXTERNAL),
                 client,
                 new ObjectMapper()))
         .runWith(Sink.seq(), materializer)
@@ -614,14 +624,9 @@ public class ElasticsearchTest {
     String doc = "dummy-doc";
 
     // #custom-index-name-example
-    WriteMessage msg = WriteMessage.createIndexMessage(doc).withIndexName("my-index");
-    // #custom-index-name-example
+    IndexRequest request = new IndexRequest("my-index"); // custom index name
 
-    // #custom-metadata-example
-    Map<String, String> metadata = new HashMap<>();
-    metadata.put("pipeline", "myPipeline");
-    WriteMessage msgWithMetadata =
-        WriteMessage.createIndexMessage(doc).withCustomMetadata(metadata);
-    // #custom-metadata-example
+    WriteMessage msg = WriteMessage.createIndexMessage(doc, request);
+    // #custom-index-name-example
   }
 }
