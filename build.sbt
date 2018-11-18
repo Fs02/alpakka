@@ -17,7 +17,7 @@ lazy val modules: Seq[ProjectReference] = Seq(
   hbase,
   hdfs,
   ironmq,
-  jms,
+//  jms,
   jsonStreaming,
   kinesis,
   kudu,
@@ -152,7 +152,7 @@ lazy val hdfs = alpakkaProject("hdfs", "hdfs", Dependencies.Hdfs, parallelExecut
 
 lazy val ironmq = alpakkaProject("ironmq", "ironmq", Dependencies.IronMq)
 
-lazy val jms = alpakkaProject("jms", "jms", Dependencies.Jms, parallelExecution in Test := false)
+//lazy val jms = alpakkaProject("jms", "jms", Dependencies.Jms, parallelExecution in Test := false)
 
 lazy val jsonStreaming = alpakkaProject("json-streaming", "json.streaming", Dependencies.JsonStreaming)
 
@@ -239,7 +239,7 @@ lazy val docs = project
       "extref.paho-api.base_url" -> "https://www.eclipse.org/paho/files/javadoc/index.html?%s.html",
       "extref.slick.base_url" -> s"https://slick.lightbend.com/doc/${Dependencies.SlickVersion}/%s",
       "javadoc.base_url" -> "https://docs.oracle.com/javase/8/docs/api/",
-      "javadoc.javax.jms.base_url" -> "https://docs.oracle.com/javaee/7/api/",
+//      "javadoc.javax.jms.base_url" -> "https://docs.oracle.com/javaee/7/api/",
       "javadoc.org.apache.kudu.base_url" -> s"https://kudu.apache.org/releases/${Dependencies.KuduVersion}/apidocs/",
       "javadoc.akka.base_url" -> s"http://doc.akka.io/japi/akka/${Dependencies.AkkaVersion}/",
       "javadoc.akka.http.base_url" -> s"http://doc.akka.io/japi/akka-http/${Dependencies.AkkaHttpVersion}/",
