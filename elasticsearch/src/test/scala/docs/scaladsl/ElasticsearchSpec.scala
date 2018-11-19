@@ -46,8 +46,14 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
 
   case class Book(title: String)
 
+  // message reader and writer
   implicit val format: JsonFormat[Book] = jsonFormat1(Book)
+  implicit def writer(message: Book): String = message.toJson.toString()
+  implicit def reader(json: String): Book = json.parseJson.convertTo[Book]
   //#define-class
+
+  implicit def jsWriter(message: JsObject): String = message.toString()
+  implicit def jsReader(json: String): JsObject = json.parseJson.asJsObject
 
   override def beforeAll() = {
     runner.build(
@@ -125,8 +131,8 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       //#run-jsobject
       val f1 = ElasticsearchSource
         .create("source", "doc")
-        .map { message: ReadResult[spray.json.JsObject] =>
-          val book: Book = jsonReader[Book].read(message.source)
+        .map { message: ReadResult[String] =>
+          val book: Book = reader(message.source)
           WriteMessage.createIndexMessage(message.id, book)
         }
         .runWith(
@@ -495,12 +501,12 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       assert(result2.forall(!_.exists(_.success == false)))
 
       // Assert docs in sink7/doc
-      val f3 = ElasticsearchSource(
-        "sink7",
-        "doc",
-      ).map { message =>
-          message.source
-        }
+      val f3 = ElasticsearchSource
+        .typed[JsObject](
+          "sink7",
+          "doc",
+        )
+        .map(_.source)
         .runWith(Sink.seq)
 
       val result3 = Await.result(f3, Duration.Inf)
@@ -545,6 +551,9 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
         .runWith(Sink.seq)
       //#multiple-operations
 
+      implicit def jsWriter(message: JsObject): String = message.toString()
+      implicit def jsReader(json: String): JsObject = json.parseJson.asJsObject
+
       val result1 = Await.result(f1, Duration.Inf)
       flush("sink8")
 
@@ -555,10 +564,12 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       "Elasticsearch exception [type=document_missing_exception, reason=[doc][00004]: document missing]"
 
       // Assert docs in sink8/doc
-      val f3 = ElasticsearchSource(
-        "sink8",
-        "doc",
-      ).map { message =>
+      val f3 = ElasticsearchSource
+        .typed[JsObject](
+          "sink8",
+          "doc",
+        )
+        .map { message =>
           message.source
         }
         .runWith(Sink.seq)
@@ -578,6 +589,8 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
 
       case class VersionTestDoc(id: String, name: String, value: Int)
       implicit val formatVersionTestDoc: JsonFormat[VersionTestDoc] = jsonFormat3(VersionTestDoc)
+      implicit def writer(message: VersionTestDoc) = message.toJson.toString()
+      implicit def reader(json: String) = json.parseJson.convertTo[VersionTestDoc]
 
       val indexName = "version-test-scala"
       val typeName = "doc"
@@ -820,6 +833,8 @@ class ElasticsearchSpec extends WordSpec with Matchers with BeforeAndAfterAll {
       //#custom-search-params
 
       implicit val formatVersionTestDoc: JsonFormat[TestDoc] = jsonFormat4(TestDoc)
+      implicit def writer(message: TestDoc): String = message.toJson.toString()
+      implicit def reader(json: String): TestDoc = json.parseJson.convertTo[TestDoc]
 
       val indexName = "custom-search-params-test-scala"
       val typeName = "doc"

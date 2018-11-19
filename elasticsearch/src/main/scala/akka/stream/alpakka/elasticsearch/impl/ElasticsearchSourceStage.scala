@@ -5,7 +5,7 @@
 package akka.stream.alpakka.elasticsearch.impl
 
 import akka.annotation.InternalApi
-import akka.stream.alpakka.elasticsearch.{ElasticsearchSourceSettings, MessageReader, ReadResult}
+import akka.stream.alpakka.elasticsearch.{ElasticsearchSourceSettings, ReadResult}
 import akka.stream.stage.{GraphStage, GraphStageLogic, OutHandler, StageLogging}
 import akka.stream.{Attributes, Outlet, SourceShape}
 import org.elasticsearch.action.ActionListener
@@ -35,7 +35,7 @@ private[elasticsearch] final class ElasticsearchSourceStage[T](indexName: String
                                                                searchSourceBuilder: SearchSourceBuilder,
                                                                client: RestHighLevelClient,
                                                                settings: ElasticsearchSourceSettings,
-                                                               reader: MessageReader[T])
+                                                               reader: String => T)
     extends GraphStage[SourceShape[ReadResult[T]]] {
 
   val out: Outlet[ReadResult[T]] = Outlet("ElasticsearchSource.out")
@@ -57,7 +57,7 @@ private[elasticsearch] final class ElasticsearchSourceLogic[T](indexName: String
                                                                settings: ElasticsearchSourceSettings,
                                                                out: Outlet[ReadResult[T]],
                                                                shape: SourceShape[ReadResult[T]],
-                                                               reader: MessageReader[T])
+                                                               reader: String => T)
     extends GraphStageLogic(shape)
     with ActionListener[SearchResponse]
     with OutHandler
@@ -128,7 +128,7 @@ private[elasticsearch] final class ElasticsearchSourceLogic[T](indexName: String
     } else {
       val messages = res.getHits.getHits.map { hit =>
         val version = if (hit.getVersion < 0) None else Some(hit.getVersion)
-        new ReadResult[T](hit.getId, reader.convert(hit.getSourceAsString), version)
+        new ReadResult[T](hit.getId, reader(hit.getSourceAsString), version)
       }
 
       val scrollResult = ScrollResult[T](res.getScrollId, messages = messages)

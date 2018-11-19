@@ -16,6 +16,7 @@ import akka.stream.alpakka.elasticsearch.javadsl.*;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.testkit.javadsl.TestKit;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.message.BasicHeader;
@@ -34,6 +35,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletionStage;
@@ -57,6 +59,25 @@ public class ElasticsearchTest {
 
     public Book(String title) {
       this.title = title;
+    }
+
+    // reader and writer
+    private static ObjectMapper mapper = new ObjectMapper();
+
+    public static String writer(Book message) {
+      try {
+        return mapper.writeValueAsString(message);
+      } catch (JsonProcessingException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
+
+    public static Book reader(String json) {
+      try {
+        return mapper.readValue(json, Book.class);
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
     }
   }
   // #define-class
@@ -130,19 +151,17 @@ public class ElasticsearchTest {
 
   @Test
   public void jsObjectStream() throws Exception {
-    // Copy source/book to sink1/book through JsObject stream
+    // Copy source/book to sink1/book through String stream
     // #run-jsobject
     ElasticsearchSourceSettings sourceSettings = ElasticsearchSourceSettings.create();
     ElasticsearchWriteSettings sinkSettings = ElasticsearchWriteSettings.create();
 
-    Source<ReadResult<Map<String, Object>>, NotUsed> source =
+    Source<ReadResult<String>, NotUsed> source =
         ElasticsearchSource.create("source", "doc", sourceSettings, client);
     CompletionStage<Done> f1 =
         source
             .map(m -> WriteMessage.createIndexMessage(m.id(), m.source()))
-            .runWith(
-                ElasticsearchSink.create("sink1", "doc", sinkSettings, client, new ObjectMapper()),
-                materializer);
+            .runWith(ElasticsearchSink.create("sink1", "doc", sinkSettings, client), materializer);
     // #run-jsobject
 
     f1.toCompletableFuture().get();
@@ -153,20 +172,20 @@ public class ElasticsearchTest {
     CompletionStage<List<String>> f2 =
         ElasticsearchSource.create(
                 "sink1", "doc", ElasticsearchSourceSettings.create().withBufferSize(5), client)
-            .map(m -> (String) m.source().get("title"))
+            .map(m -> (String) m.source() /*.get("title")*/)
             .runWith(Sink.seq(), materializer);
 
     List<String> result = new ArrayList<>(f2.toCompletableFuture().get());
 
     List<String> expect =
         Arrays.asList(
-            "Akka Concurrency",
-            "Akka in Action",
-            "Effective Akka",
-            "Learning Scala",
-            "Programming in Scala",
-            "Scala Puzzlers",
-            "Scala for Spark in Production");
+            "{\"title\":\"Akka Concurrency\"}",
+            "{\"title\":\"Akka in Action\"}",
+            "{\"title\":\"Effective Akka\"}",
+            "{\"title\":\"Learning Scala\"}",
+            "{\"title\":\"Programming in Scala\"}",
+            "{\"title\":\"Scala Puzzlers\"}",
+            "{\"title\":\"Scala for Spark in Production\"}");
 
     Collections.sort(result);
     assertEquals(expect, result);
@@ -180,12 +199,12 @@ public class ElasticsearchTest {
     ElasticsearchWriteSettings sinkSettings = ElasticsearchWriteSettings.create();
 
     Source<ReadResult<Book>, NotUsed> source =
-        ElasticsearchSource.typed("source", "doc", sourceSettings, client, Book.class);
+        ElasticsearchSource.typed("source", "doc", sourceSettings, client, Book::reader);
     CompletionStage<Done> f1 =
         source
             .map(m -> WriteMessage.createIndexMessage(m.id(), m.source()))
             .runWith(
-                ElasticsearchSink.create("sink2", "doc", sinkSettings, client, new ObjectMapper()),
+                ElasticsearchSink.create("sink2", "doc", sinkSettings, client, Book::writer),
                 materializer);
     // #run-typed
 
@@ -200,7 +219,7 @@ public class ElasticsearchTest {
                 "doc",
                 ElasticsearchSourceSettings.create().withBufferSize(5),
                 client,
-                Book.class)
+                Book::reader)
             .map(m -> m.source().title)
             .runWith(Sink.seq(), materializer);
 
@@ -230,7 +249,7 @@ public class ElasticsearchTest {
                 "doc",
                 ElasticsearchSourceSettings.create().withBufferSize(5),
                 client,
-                Book.class)
+                Book::reader)
             .map(m -> WriteMessage.createIndexMessage(m.id(), m.source()))
             .via(
                 ElasticsearchFlow.create(
@@ -238,7 +257,7 @@ public class ElasticsearchTest {
                     "doc",
                     ElasticsearchWriteSettings.create().withBufferSize(5),
                     client,
-                    new ObjectMapper()))
+                    Book::writer))
             .runWith(Sink.seq(), materializer);
     // #run-flow
 
@@ -256,7 +275,7 @@ public class ElasticsearchTest {
                 "doc",
                 ElasticsearchSourceSettings.create().withBufferSize(5),
                 client,
-                Book.class)
+                Book::reader)
             .map(m -> m.source().title)
             .runWith(Sink.seq(), materializer);
 
@@ -291,7 +310,7 @@ public class ElasticsearchTest {
     Source.from(requests)
         .via(
             ElasticsearchFlow.create(
-                "sink8", "doc", ElasticsearchWriteSettings.create(), client, new ObjectMapper()))
+                "sink8", "doc", ElasticsearchWriteSettings.create(), client, Book::writer))
         .runWith(Sink.seq(), materializer)
         .toCompletableFuture()
         .get();
@@ -302,7 +321,7 @@ public class ElasticsearchTest {
     // Assert docs in sink8/book
     CompletionStage<List<String>> f2 =
         ElasticsearchSource.typed(
-                "sink8", "doc", ElasticsearchSourceSettings.create(), client, Book.class)
+                "sink8", "doc", ElasticsearchSourceSettings.create(), client, Book::reader)
             .map(m -> m.source().title)
             .runWith(Sink.seq(), materializer);
 
@@ -343,7 +362,7 @@ public class ElasticsearchTest {
                 "doc",
                 ElasticsearchWriteSettings.create().withBufferSize(5),
                 client,
-                new ObjectMapper()))
+                Book::writer))
         .map(
             messageResults -> {
               messageResults
@@ -370,7 +389,7 @@ public class ElasticsearchTest {
     // Assert that all docs were written to elastic
     List<String> result2 =
         ElasticsearchSource.typed(
-                "sink6", "doc", ElasticsearchSourceSettings.create(), client, Book.class)
+                "sink6", "doc", ElasticsearchSourceSettings.create(), client, Book::reader)
             .map(m -> m.source().title)
             .runWith(Sink.seq(), materializer) // Run it
             .toCompletableFuture()
@@ -398,7 +417,7 @@ public class ElasticsearchTest {
                 typeName,
                 ElasticsearchWriteSettings.create().withBufferSize(5),
                 client,
-                new ObjectMapper()))
+                Book::writer))
         .runWith(Sink.seq(), materializer)
         .toCompletableFuture()
         .get();
@@ -412,7 +431,7 @@ public class ElasticsearchTest {
                 typeName,
                 ElasticsearchSourceSettings.create().withIncludeDocumentVersion(true),
                 client,
-                Book.class)
+                Book::reader)
             .runWith(Sink.head(), materializer)
             .toCompletableFuture()
             .get();
@@ -432,7 +451,7 @@ public class ElasticsearchTest {
                 typeName,
                 ElasticsearchWriteSettings.create().withBufferSize(5),
                 client,
-                new ObjectMapper()))
+                Book::writer))
         .runWith(Sink.seq(), materializer)
         .toCompletableFuture()
         .get();
@@ -452,7 +471,7 @@ public class ElasticsearchTest {
                     typeName,
                     ElasticsearchWriteSettings.create().withBufferSize(5),
                     client,
-                    new ObjectMapper()))
+                    Book::writer))
             .runWith(Sink.seq(), materializer)
             .toCompletableFuture()
             .get()
@@ -485,7 +504,7 @@ public class ElasticsearchTest {
                     .withBufferSize(5)
                     .withVersionType(VersionType.EXTERNAL),
                 client,
-                new ObjectMapper()))
+                Book::writer))
         .runWith(Sink.seq(), materializer)
         .toCompletableFuture()
         .get();
@@ -499,7 +518,7 @@ public class ElasticsearchTest {
                 typeName,
                 ElasticsearchSourceSettings.create().withIncludeDocumentVersion(true),
                 client,
-                Book.class)
+                Book::reader)
             .runWith(Sink.seq(), materializer)
             .toCompletableFuture()
             .get()
@@ -525,6 +544,25 @@ public class ElasticsearchTest {
       this.c = c;
     }
     // #custom-search-params
+
+    // reader and writer
+    private static ObjectMapper mapper = new ObjectMapper();
+
+    public static String writer(TestDoc message) {
+      try {
+        return mapper.writeValueAsString(message);
+      } catch (JsonProcessingException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
+
+    public static TestDoc reader(String json) {
+      try {
+        return mapper.readValue(json, TestDoc.class);
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
   }
   // #custom-search-params
 
@@ -549,7 +587,7 @@ public class ElasticsearchTest {
                 typeName,
                 ElasticsearchWriteSettings.create().withBufferSize(5),
                 client,
-                new ObjectMapper()))
+                TestDoc::writer))
         .runWith(Sink.seq(), materializer)
         .toCompletableFuture()
         .get();
@@ -568,8 +606,7 @@ public class ElasticsearchTest {
                 new SearchSourceBuilder().fetchSource(includes, null),
                 ElasticsearchSourceSettings.create(),
                 client,
-                TestDoc.class,
-                new ObjectMapper())
+                TestDoc::reader)
             .map(
                 o -> {
                   return o.source(); // These documents will only have property id, a and c (not b)

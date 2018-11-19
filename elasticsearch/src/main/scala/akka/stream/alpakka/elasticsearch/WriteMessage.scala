@@ -11,7 +11,6 @@ import org.elasticsearch.action.delete.DeleteRequest
 import org.elasticsearch.action.index.IndexRequest
 import org.elasticsearch.action.update.UpdateRequest
 
-import scala.collection.JavaConverters._
 import scala.compat.java8.OptionConverters._
 
 /**

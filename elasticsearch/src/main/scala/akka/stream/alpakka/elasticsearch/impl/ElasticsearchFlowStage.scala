@@ -16,9 +16,7 @@ import org.elasticsearch.action.delete.DeleteRequest
 import org.elasticsearch.action.index.IndexRequest
 import org.elasticsearch.action.update.UpdateRequest
 import org.elasticsearch.client.RestHighLevelClient
-import org.elasticsearch.common.lucene.uid.Versions
 import org.elasticsearch.common.xcontent.XContentType
-import org.elasticsearch.index.VersionType
 
 import scala.collection.mutable
 import scala.concurrent.Future
@@ -32,7 +30,7 @@ private[elasticsearch] final class ElasticsearchFlowStage[T, C](
     typeName: String,
     client: RestHighLevelClient,
     settings: ElasticsearchWriteSettings,
-    writer: MessageWriter[T]
+    writer: T => String
 ) extends GraphStage[FlowShape[WriteMessage[T, C], Future[Seq[WriteResult[T, C]]]]] {
 
   private val in = Inlet[WriteMessage[T, C]]("messages")
@@ -161,13 +159,13 @@ private[elasticsearch] final class ElasticsearchFlowStage[T, C](
           message.operation match {
             case Index =>
               val indexRequest = request.asInstanceOf[IndexRequest]
-              indexRequest.source(writer.convert(message.source.get), XContentType.JSON)
+              indexRequest.source(writer(message.source.get), XContentType.JSON)
 
               if (indexRequest.index() == null) indexRequest.index(indexName)
               if (indexRequest.`type`() == null) indexRequest.`type`(typeName)
             case Update | Upsert =>
               val updateRequest = request.asInstanceOf[UpdateRequest]
-              updateRequest.doc(writer.convert(message.source.get), XContentType.JSON)
+              updateRequest.doc(writer(message.source.get), XContentType.JSON)
 
               if (updateRequest.index() == null) updateRequest.index(indexName)
               if (updateRequest.`type`() == null) updateRequest.`type`(typeName)

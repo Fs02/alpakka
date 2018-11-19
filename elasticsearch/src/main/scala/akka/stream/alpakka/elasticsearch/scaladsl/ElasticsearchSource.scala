@@ -9,7 +9,6 @@ import akka.stream.alpakka.elasticsearch._
 import akka.stream.scaladsl.Source
 import org.elasticsearch.client.RestHighLevelClient
 import org.elasticsearch.search.builder.SearchSourceBuilder
-import spray.json._
 
 /**
  * Scala API to create Elasticsearch sources.
@@ -26,7 +25,7 @@ object ElasticsearchSource {
             searchSourceBuilder: SearchSourceBuilder = new SearchSourceBuilder(),
             settings: ElasticsearchSourceSettings = ElasticsearchSourceSettings.Default)(
       implicit client: RestHighLevelClient
-  ): Source[ReadResult[JsObject], NotUsed] = create(indexName, typeName, searchSourceBuilder, settings)
+  ): Source[ReadResult[String], NotUsed] = create(indexName, typeName, searchSourceBuilder, settings)
 
   /**
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s
@@ -38,7 +37,7 @@ object ElasticsearchSource {
             searchSourceBuilder: SearchSourceBuilder,
             settings: ElasticsearchSourceSettings)(
       implicit client: RestHighLevelClient
-  ): Source[ReadResult[JsObject], NotUsed] = create(indexName, typeName, searchSourceBuilder, settings)
+  ): Source[ReadResult[String], NotUsed] = create(indexName, typeName, searchSourceBuilder, settings)
 
   /**
    * Creates a [[akka.stream.scaladsl.Source]] from Elasticsearch that streams [[ReadResult]]s
@@ -49,7 +48,7 @@ object ElasticsearchSource {
              searchSourceBuilder: SearchSourceBuilder = new SearchSourceBuilder(),
              settings: ElasticsearchSourceSettings = ElasticsearchSourceSettings.Default)(
       implicit client: RestHighLevelClient
-  ): Source[ReadResult[JsObject], NotUsed] =
+  ): Source[ReadResult[String], NotUsed] =
     create(indexName, Option(typeName), searchSourceBuilder, settings)
 
   /**
@@ -61,7 +60,7 @@ object ElasticsearchSource {
              searchSourceBuilder: SearchSourceBuilder,
              settings: ElasticsearchSourceSettings)(
       implicit client: RestHighLevelClient
-  ): Source[ReadResult[JsObject], NotUsed] =
+  ): Source[ReadResult[String], NotUsed] =
     Source.fromGraph(
       new impl.ElasticsearchSourceStage(
         indexName,
@@ -69,7 +68,7 @@ object ElasticsearchSource {
         searchSourceBuilder,
         client,
         settings,
-        new SprayJsonReader[JsObject]()(DefaultJsonProtocol.RootJsObjectFormat)
+        identity
       )
     )
 
@@ -82,7 +81,7 @@ object ElasticsearchSource {
                searchSourceBuilder: SearchSourceBuilder = new SearchSourceBuilder(),
                settings: ElasticsearchSourceSettings = ElasticsearchSourceSettings.Default)(
       implicit client: RestHighLevelClient,
-      reader: JsonReader[T]
+      reader: String => T
   ): Source[ReadResult[T], NotUsed] =
     typed(indexName, Option(typeName), searchSourceBuilder, settings)
 
@@ -95,21 +94,9 @@ object ElasticsearchSource {
                searchSourceBuilder: SearchSourceBuilder,
                settings: ElasticsearchSourceSettings)(
       implicit client: RestHighLevelClient,
-      reader: JsonReader[T]
+      reader: String => T
   ): Source[ReadResult[T], NotUsed] =
     Source.fromGraph(
-      new impl.ElasticsearchSourceStage(indexName,
-                                        typeName,
-                                        searchSourceBuilder,
-                                        client,
-                                        settings,
-                                        new SprayJsonReader[T]()(reader))
+      new impl.ElasticsearchSourceStage(indexName, typeName, searchSourceBuilder, client, settings, reader)
     )
-
-  private final class SprayJsonReader[T](implicit reader: JsonReader[T]) extends MessageReader[T] {
-
-    override def convert(json: String): T = json.parseJson.convertTo[T]
-
-  }
-
 }

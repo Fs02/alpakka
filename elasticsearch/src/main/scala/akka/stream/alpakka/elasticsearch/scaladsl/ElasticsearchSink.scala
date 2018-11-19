@@ -8,7 +8,6 @@ import akka.stream.alpakka.elasticsearch._
 import akka.stream.scaladsl.{Keep, Sink}
 import akka.{Done, NotUsed}
 import org.elasticsearch.client.RestHighLevelClient
-import spray.json.JsonWriter
 
 import scala.concurrent.Future
 
@@ -24,7 +23,7 @@ object ElasticsearchSink {
                 typeName: String,
                 settings: ElasticsearchWriteSettings = ElasticsearchWriteSettings.Default)(
       implicit client: RestHighLevelClient,
-      writer: JsonWriter[T]
+      writer: T => String
   ): Sink[WriteMessage[T, NotUsed], Future[Done]] =
     ElasticsearchFlow.create[T](indexName, typeName, settings).toMat(Sink.ignore)(Keep.right)
 
